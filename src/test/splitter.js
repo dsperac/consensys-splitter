@@ -1,6 +1,6 @@
 var Splitter = artifacts.require("./Splitter.sol");
 
-contract('Splitter', function(accounts) {
+contract('Splitter', function (accounts) {
 
   var owner = accounts[0];
   var alice = accounts[1];
@@ -8,47 +8,47 @@ contract('Splitter', function(accounts) {
   var carol = accounts[3];
   var contract;
 
-  beforeEach(function () {
+  beforeEach(() => {
     return Splitter.new(alice, bob, carol, { from: owner }).then(instance => contract = instance);
   });
 
-  it ("should deploy properly", function () {
-    return contract.alice().then(function (a) {
+  it ("should deploy properly", () => {
+    return contract.alice().then((a) => {
       assert.equal(a, alice, "Alice's address does not match");
       return contract.bob();
-    }).then(function (b) {
+    }).then((b) => {
       assert.equal(b, bob, "Bob's address does not match");
       return contract.carol();
-    }).then(function (c) {
+    }).then((c) => {
       assert.equal(c, carol, "Carol's address does not match");
       return web3.eth.getBalance(contract.address);
-    }).then(function (contractBalance) {
+    }).then((contractBalance) => {
       assert.equal(contractBalance.toString(10), "0");
     });
   });
 
-  it ("should contribute and not split funds when funder not Alice", function () {
-    return contract.sendTransaction({ from: owner, value: web3.toWei(1, "ether") }).then(function () {
+  it ("should contribute and not split funds when funder not Alice", () => {
+    return contract.sendTransaction({ from: owner, value: web3.toWei(1, "ether") }).then(() => {
       return web3.eth.getBalance(contract.address);
-    }).then(function (contractBalance) {
+    }).then((contractBalance) => {
       assert.equal(contractBalance.toString(10), web3.toWei(1, "ether"));
-    }).then(function () {
+    }).then(() => {
       return contract.sendTransaction({ from: owner, value: web3.toWei(1, "ether") })
-    }).then(function () {
+    }).then(() => {
       return web3.eth.getBalance(contract.address);
-    }).then(function (contractBalance) {
+    }).then((contractBalance) => {
       assert.equal(contractBalance.toString(10), web3.toWei(2, "ether"));
     });
   });
   
-  it ("should properly split when Alice contributes", function () {
+  it ("should properly split when Alice contributes", () => {
     var contractBalance = web3.eth.getBalance(contract.address);
     var bobBalance = web3.eth.getBalance(bob);
     var carolBalance = web3.eth.getBalance(carol);
 
-    return contract.sendTransaction({ from: owner, value: web3.toWei(1, "ether") }).then(function () {
+    return contract.sendTransaction({ from: owner, value: web3.toWei(1, "ether") }).then(() => {
       return contract.sendTransaction({ from: alice, value: web3.toWei(2, "ether") });
-    }).then(function () {
+    }).then(() => {
       var newContractBalance = web3.eth.getBalance(contract.address);
       var newBobBalance = web3.eth.getBalance(bob);
       var newCarolBalance = web3.eth.getBalance(carol);
@@ -59,12 +59,12 @@ contract('Splitter', function(accounts) {
     });
   });
 
-  it ("should properly suicide and send funds to owner", function () {
+  it ("should properly suicide and send funds to owner", () => {
     var ownerBalance = web3.eth.getBalance(owner);
 
-    return contract.sendTransaction({ from: bob, value: web3.toWei(10, "ether") }).then(function () {
+    return contract.sendTransaction({ from: bob, value: web3.toWei(10, "ether") }).then(() => {
       return contract.killMe.sendTransaction({ from: owner });
-    }).then(function () {
+    }).then(() => {
       var newOwnerBalance = web3.eth.getBalance(owner);
       var newContractBalance = web3.eth.getBalance(contract.address);
 
