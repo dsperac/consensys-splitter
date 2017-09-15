@@ -7,6 +7,9 @@ contract Splitter {
     address public carol;
     bool isSending;
     
+    event OnContribution(address indexed contributor, uint value);
+    event OnSplit(address bob, address carol, uint valueEach);
+
     function Splitter(address _alice, address _bob, address _carol) payable {
         require (_alice != address(0));
         require (_bob != address(0));
@@ -28,6 +31,8 @@ contract Splitter {
         // handle odd amount of balance by giving back the owner 1 wei
         if (this.balance != 0 && !owner.send(this.balance)) revert();
         
+        OnSplit(bob, carol, bobsShare);
+
         isSending = false;
     }
 
@@ -40,6 +45,8 @@ contract Splitter {
     function () payable {
         require(msg.value > 0);
         
+        OnContribution(msg.sender, msg.value);
+
         if (msg.sender == alice && !isSending) {
             isSending = true;
             splitBalance();
