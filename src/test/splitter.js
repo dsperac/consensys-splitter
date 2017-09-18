@@ -1,4 +1,8 @@
 var Splitter = artifacts.require("./Splitter.sol");
+var Promise = require("bluebird");
+var _ = require("underscore");
+
+Promise.promisifyAll(web3.eth);
 
 contract('Splitter', function (accounts) {
 
@@ -9,67 +13,141 @@ contract('Splitter', function (accounts) {
   var contract;
 
   beforeEach(() => {
-    return Splitter.new(alice, bob, carol, { from: owner }).then(instance => contract = instance);
+    return Splitter.new({ from: owner }).then(instance => contract = instance);
   });
 
   it ("should deploy properly", () => {
-    return contract.alice().then((a) => {
-      assert.equal(a, alice, "Alice's address does not match");
-      return contract.bob();
-    }).then((b) => {
-      assert.equal(b, bob, "Bob's address does not match");
-      return contract.carol();
-    }).then((c) => {
-      assert.equal(c, carol, "Carol's address does not match");
-      return web3.eth.getBalance(contract.address);
-    }).then((contractBalance) => {
+    return web3.eth.getBalanceAsync(contract.address).then(contractBalance => {
       assert.equal(contractBalance.toString(10), "0");
     });
   });
 
-  it ("should contribute and not split funds when funder not Alice", () => {
-    return contract.sendTransaction({ from: owner, value: web3.toWei(1, "ether") }).then(() => {
-      return web3.eth.getBalance(contract.address);
-    }).then((contractBalance) => {
-      assert.equal(contractBalance.toString(10), web3.toWei(1, "ether"));
-    }).then(() => {
-      return contract.sendTransaction({ from: owner, value: web3.toWei(1, "ether") })
-    }).then(() => {
-      return web3.eth.getBalance(contract.address);
-    }).then((contractBalance) => {
-      assert.equal(contractBalance.toString(10), web3.toWei(2, "ether"));
+  it ("should let a person withdraw then they have a positive balance", () => {
+    var originalBobsBalance;
+
+    return web3.eth.getBalanceAsync(bob)
+    .then(balance => {
+      originalBobsBalance = balance;
+      return contract.contributeAndSplit(bob, carol, { from: alice, value: web3.toWei(2, "ether") });
+    }).then((tx) => {
+      assert.isTrue(!_.isUndefined(tx.receipt));
+
+      var onContributionEvent = _(tx.logs).findWhere({ event: "OnContribution" });
+      assert.isTrue(!_.isUndefined(onContributionEvent));
+
+      return contract.accounts(bob);
+    }).then(bobsContractBalance => {
+      assert.isTrue(bobsContractBalance.greaterThan(0));
+
+      return contract.withdraw({ from: bob });
+    }).then(tx => {
+      assert.isTrue(!_.isUndefined(tx.receipt));
+
+      var onWithdrawalEvent = _(tx.logs).findWhere({ event: "OnWithdrawal" });
+      assert.isTrue(!_.isUndefined(onWithdrawalEvent));
+
+      return web3.eth.getBalanceAsync(bob); 
+    }).then(balance => {
+      assert.isTrue(balance.greaterThan(originalBobsBalance));
     });
+  });
+
+  it ("should reject withdrawal on 0 balance", () => {
+    return contract.accounts(bob)
+    .then(bobsContractBalance => {
+      assert.equal(bobsContractBalance.toString(10), "0");
+
+      return contract.withdraw.sendTransaction({ from: bob });
+    })
+    .then(assert.fail)
+    .catch(_.noop);
   });
   
   it ("should properly split when Alice contributes", () => {
-    var contractBalance = web3.eth.getBalance(contract.address);
-    var bobBalance = web3.eth.getBalance(bob);
-    var carolBalance = web3.eth.getBalance(carol);
+    var originalContractBalance;
+    var originalBobsContractAccount;
+    var originalCarolsContractAccount;
 
-    return contract.sendTransaction({ from: owner, value: web3.toWei(1, "ether") }).then(() => {
-      return contract.sendTransaction({ from: alice, value: web3.toWei(2, "ether") });
-    }).then(() => {
-      var newContractBalance = web3.eth.getBalance(contract.address);
-      var newBobBalance = web3.eth.getBalance(bob);
-      var newCarolBalance = web3.eth.getBalance(carol);
+    return Promise.all([
+      web3.eth.getBalanceAsync(contract.address),
+      contract.accounts(bob),
+      contract.accounts(carol)
+    ]).then(results => {
+      originalContractBalance = results[0];
+      originalBobsContractAccount = results[1];
+      originalCarolsContractAccount = results[2];
 
-      assert.equal(newContractBalance.toString(10), "0");
-      assert.equal(newBobBalance.toString(10), bobBalance.plus(web3.toWei(3, "ether") / 2).toString(10));
-      assert.equal(newCarolBalance.toString(10), carolBalance.plus(web3.toWei(3, "ether") / 2).toString(10));
+      return contract.contributeAndSplit(bob, carol, { from: alice, value: web3.toWei(2, "ether") });
+    }).then((tx) => {
+      assert.isTrue(!_.isUndefined(tx.receipt));
+
+      var onContributionEvent = _(tx.logs).findWhere({ event: "OnContribution" });
+      assert.isTrue(!_.isUndefined(onContributionEvent));
+
+      return contract.contributeAndSplit(bob, carol, { from: alice, value: 1 });
+    }).then((tx) => {
+      assert.isTrue(!_.isUndefined(tx.receipt));
+
+      var onContributionEvent = _(tx.logs).findWhere({ event: "OnContribution" });
+      assert.isTrue(!_.isUndefined(onContributionEvent));
+
+      var contractBalancePromise = web3.eth.getBalanceAsync(contract.address);
+      var alicesContractAccountPromise = contract.accounts(alice);
+      var bobsContractAccountPromise = contract.accounts(bob);
+      var carolsContractAccountPromise = contract.accounts(carol);
+
+      return Promise.all([contractBalancePromise, alicesContractAccountPromise, bobsContractAccountPromise, carolsContractAccountPromise]);
+    }).then(results => {
+      var contractBalance = results[0];
+      var alicesContractAccount = results[1];
+      var bobsContractAccount = results[2];
+      var carolsContractAccount = results[3];
+      
+      assert.equal(contractBalance.toString(10), originalContractBalance.plus(web3.toWei(2, "ether")).plus(1).toString(10));
+      assert.equal(alicesContractAccount.toString(10), "1");
+      assert.equal(bobsContractAccount.toString(10), originalBobsContractAccount.plus(web3.toWei(2, "ether")).plus(1).dividedToIntegerBy(2).toString(10), "w2");
+      assert.equal(carolsContractAccount.toString(10), originalCarolsContractAccount.plus(web3.toWei(2, "ether")).plus(1).dividedToIntegerBy(2).toString(10), "w3");
     });
   });
 
-  it ("should properly suicide and send funds to owner", () => {
-    var ownerBalance = web3.eth.getBalance(owner);
+  it ("should not allow non owner to suicide", () => {
+    return contract.contributeAndSplit(bob, carol, { from: alice, value: web3.toWei(10, "ether") })
+    .then(tx => {
+      assert.isTrue(!_.isUndefined(tx.receipt));
 
-    return contract.sendTransaction({ from: bob, value: web3.toWei(10, "ether") }).then(() => {
+      var onContributionEvent = _(tx.logs).findWhere({ event: "OnContribution" });
+      assert.isTrue(!_.isUndefined(onContributionEvent));
+
+      return contract.killMe.sendTransaction({ from: alice });
+    }).then(assert.fail)
+    .catch(_.noop);
+  });
+
+  it ("should properly suicide and send funds to owner", () => {
+    var originalOwnerBalance;
+
+    return web3.eth.getBalanceAsync(owner)
+    .then(balance => {
+      originalOwnerBalance = balance;
+      return contract.contributeAndSplit(bob, carol, { from: alice, value: web3.toWei(10, "ether") });
+    }).then(tx => {
+      assert.isTrue(!_.isUndefined(tx.receipt));
+
+      var onContributionEvent = _(tx.logs).findWhere({ event: "OnContribution" });
+      assert.isTrue(!_.isUndefined(onContributionEvent));
+
       return contract.killMe.sendTransaction({ from: owner });
     }).then(() => {
-      var newOwnerBalance = web3.eth.getBalance(owner);
-      var newContractBalance = web3.eth.getBalance(contract.address);
+      var ownerBalancePromise = web3.eth.getBalanceAsync(owner);
+      var contractBalancePromise = web3.eth.getBalanceAsync(contract.address);
 
-      assert.equal(newContractBalance.toString(10), "0");
-      assert.isTrue(newOwnerBalance.greaterThan(ownerBalance));
+      return Promise.all([ownerBalancePromise, contractBalancePromise]);
+    }).then(results => {
+      var ownerBalance = results[0];
+      var contractBalance = results[1];
+
+      assert.equal(contractBalance.toString(10), "0");
+      assert.isTrue(ownerBalance.greaterThan(originalOwnerBalance));
     });
   });
 });
