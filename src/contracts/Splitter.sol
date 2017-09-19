@@ -1,55 +1,43 @@
 pragma solidity ^0.4.5;
 
-contract Splitter {
-    address owner;
-    address public alice;
-    address public bob;
-    address public carol;
-    bool isSending;
+import "./Ownable.sol";
+
+contract Splitter is Ownable {
+    mapping(address => uint256) public accounts;
     
-    event OnContribution(address indexed contributor, uint value);
-    event OnSplit(address bob, address carol, uint valueEach);
+    event OnContribution(address indexed contributor, address indexed account1, address indexed account2, uint amountContributed);
+    event OnWithdrawal(address indexed account, uint amountWithdrawn);
 
-    function Splitter(address _alice, address _bob, address _carol) payable {
-        require (_alice != address(0));
-        require (_bob != address(0));
-        require (_carol != address(0));
-        
-        owner = msg.sender;
-        alice = _alice;
-        bob = _bob;
-        carol = _carol;
-    }
+    function contributeAndSplit(address account1, address account2) payable public {
+        require (account1 != address(0));
+        require (account2 != address(0));
+        require (account1 != account2);
+        require (msg.value > 0);
 
-    function splitBalance() private {
-        var bobsShare = this.balance / 2;
-        var carolsShare = this.balance / 2;
+        uint sharePerAccount = msg.value / 2;
         
-        if (bobsShare == 0 || !bob.send(bobsShare)) revert();
-        if (carolsShare == 0 || !carol.send(carolsShare)) revert();
-        
-        // handle odd amount of balance by giving back the owner 1 wei
-        if (this.balance != 0 && !owner.send(this.balance)) revert();
-        
-        OnSplit(bob, carol, bobsShare);
+        accounts[account1] += sharePerAccount;
+        accounts[account2] += sharePerAccount;
 
-        isSending = false;
-    }
-
-    function killMe() {
-        require(msg.sender == owner);
-        
-        suicide(owner);
-    }
-
-    function () payable {
-        require(msg.value > 0);
-        
-        OnContribution(msg.sender, msg.value);
-
-        if (msg.sender == alice && !isSending) {
-            isSending = true;
-            splitBalance();
+        if (msg.value % 2 != 0) {
+            accounts[msg.sender] = 1;
         }
+
+        OnContribution(msg.sender, account1, account2, msg.value);
+    }
+
+    function withdraw() public {
+        uint senderBalance = accounts[msg.sender];
+
+        require(senderBalance > 0);
+
+        msg.sender.transfer(senderBalance);
+        accounts[msg.sender] = 0;
+
+        OnWithdrawal(msg.sender, senderBalance);
+    }
+
+    function killMe() onlyOwner {
+        selfdestruct(owner);
     }
 }
